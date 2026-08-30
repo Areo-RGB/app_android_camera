@@ -2,7 +2,6 @@ package com.example.network
 
 import android.content.Context
 import android.util.Log
-import com.example.model.CameraNodeInfo
 import com.example.model.NetworkPacket
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
@@ -27,7 +26,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.concurrent.ConcurrentHashMap
 
 data class NearbyDiscoveredDirector(
     val endpointId: String,
@@ -159,11 +157,13 @@ class NearbyConnectionsManager(private val context: Context) {
 
     fun stopAdvertising() {
         try {
+            // Always call the platform stop API. The local state can be stale after an error,
+            // and stopAdvertising() is safe even when advertising is no longer active.
             connectionsClient.stopAdvertising()
-            _isAdvertising.value = false
-            log("Nearby: Stopped advertising")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping advertising", e)
+        } finally {
+            _isAdvertising.value = false
         }
     }
 
@@ -214,11 +214,13 @@ class NearbyConnectionsManager(private val context: Context) {
 
     fun stopDiscovery() {
         try {
+            // Always stop the platform operation so re-entering Camera Node mode starts cleanly.
             connectionsClient.stopDiscovery()
-            _isDiscovering.value = false
-            log("Nearby: Stopped discovery")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping discovery", e)
+        } finally {
+            _isDiscovering.value = false
+            _discoveredDirectors.value = emptyList()
         }
     }
 
@@ -321,13 +323,19 @@ class NearbyConnectionsManager(private val context: Context) {
     }
 
     fun stopAllEndpoints() {
+        // Nearby treats advertising, discovery, and endpoint connections as separate operations.
+        // Tear down all three so Director -> Hub -> Director and Node -> Hub -> Node are restart-safe.
+        stopAdvertising()
+        stopDiscovery()
         try {
             connectionsClient.stopAllEndpoints()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping all endpoints", e)
+        } finally {
             _connectedEndpoints.value = emptyMap()
             _isAdvertising.value = false
             _isDiscovering.value = false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping all endpoints", e)
+            _discoveredDirectors.value = emptyList()
         }
     }
 
