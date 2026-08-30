@@ -11,6 +11,7 @@ import android.util.Range
 import android.view.View
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalSessionConfig
 import androidx.camera.core.Preview
 import androidx.camera.core.SessionConfig
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -114,6 +115,7 @@ class CameraXManager(private val context: Context) {
         }, ContextCompat.getMainExecutor(context))
     }
 
+    @OptIn(ExperimentalSessionConfig::class)
     private fun setupAndBind(settings: RecordingSettings) {
         val provider = cameraProvider ?: return
         val lifecycleOwner = currentLifecycleOwner ?: return
@@ -159,7 +161,7 @@ class CameraXManager(private val context: Context) {
             // session so the FPS selector controls the real camera session rather than UI only.
             val requestedFps = requestedFps(settings)
             val baseSessionConfig = SessionConfig.Builder(preview, capture).build()
-            val cameraInfo = provider.getCameraInfo(cameraSelector, baseSessionConfig)
+            val cameraInfo = provider.getCameraInfo(cameraSelector)
             val supportedFrameRateRanges = cameraInfo.getSupportedFrameRateRanges(baseSessionConfig)
             val selectedFrameRateRange = selectFrameRateRange(requestedFps, supportedFrameRateRanges)
 
