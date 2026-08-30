@@ -142,7 +142,7 @@ fun HelpConnectionDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Der synchrone Countdown mit optischer Klappe und Sync-Signalton synchronisiert alle Kameras auf die Millisekunde genau für einfachen Videoschnitt.",
+                            text = "Der Controller sendet sofortige Start/Stopp-Aufnahme-Trigger an alle verbundenen Smartphones via Nearby Connections. Der Videoschnitt und Audio-Sync erfolgt präzise in deiner Videoschnitt-Software (Post-Production).",
                             fontSize = 12.sp,
                             color = TextSecondary,
                             lineHeight = 16.sp

@@ -270,7 +270,7 @@ fun HubScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Steuere alle anderen verbundenen Handys gleichzeitig. Passe Auflösung, FPS, Blitz und Audio für alle Kameras an und starte synchrone Takes mit 3s-Klappe.",
+                        text = "Steuere alle verbundenen Smartphones ferngesteuert als Master-Controller. Sendet sofortige Start/Stopp-Aufnahme-Trigger über Google Nearby Connections (P2P). Der Videoschnitt und Audio-Sync erfolgt flexibel in der Post-Production.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         lineHeight = 18.sp
@@ -363,7 +363,7 @@ fun HubScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Verbinde dieses Smartphone als ferngesteuerte Kamera (z.B. Cam A, Cam B, Cam C). Empfängt automatisch Start/Stopp-Signale und Auflösungs-Einstellungen vom Director.",
+                        text = "Verbinde dieses Smartphone als ferngesteuerte Kamera. Reagiert sofort auf Aufnahme-Trigger vom Controller via Google Nearby Connections.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         lineHeight = 18.sp

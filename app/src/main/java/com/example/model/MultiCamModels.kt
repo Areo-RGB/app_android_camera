@@ -42,8 +42,8 @@ data class RecordingSettings(
     val lens: String = CameraLens.BACK.name,
     val audioEnabled: Boolean = true,
     val torchEnabled: Boolean = false,
-    val countdownSeconds: Int = 3,
-    val clapperSyncBeep: Boolean = true,
+    val countdownSeconds: Int = 0,
+    val clapperSyncBeep: Boolean = false,
     val sceneName: String = "Scene 1",
     val takeNumber: Int = 1
 )

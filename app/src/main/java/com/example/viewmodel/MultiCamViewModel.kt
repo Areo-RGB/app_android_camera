@@ -288,38 +288,46 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
         updateSettings(_settings.value.copy(takeNumber = _settings.value.takeNumber + 1))
     }
 
-    // --- Synchronized Start / Stop Recording ---
+    // --- Remote Trigger Start / Stop Recording ---
 
     fun startMasterRecording() {
         if (_isRecording.value) return
         val current = _settings.value
         val takeTag = "${current.sceneName}_Take_${current.takeNumber}"
         val countdownSec = current.countdownSeconds
-        val targetStartTimestamp = System.currentTimeMillis() + (countdownSec * 1000L)
 
-        // Broadcast over Wi-Fi Server
+        // Broadcast Trigger over Wi-Fi Server
         directorServer?.broadcastStartRecording(
             settings = current,
             countdownSeconds = countdownSec,
             takeTag = takeTag
         )
 
-        // Broadcast over Google Nearby Connections
+        // Broadcast Trigger over Google Nearby Connections immediately
         nearbyManager.broadcastPacket(
             NetworkPacket(
                 type = NetworkPacket.TYPE_START_RECORDING,
                 senderId = "DIRECTOR",
                 senderName = "Director",
                 settings = current,
-                countdownTargetTimeMs = targetStartTimestamp,
                 takeTag = takeTag
             )
         )
 
-        logDirectorEvent("START RECORDING broadcasted (Countdown: ${countdownSec}s, Take: $takeTag)")
+        logDirectorEvent("TRIGGER SENT: Start Recording ($takeTag) via Nearby Connections")
 
-        // Run local synced countdown & record
-        runSyncedCountdown(countdownSec, takeTag, isDirector = true)
+        if (countdownSec <= 0) {
+            // Immediate Remote Trigger
+            if (_isDirectorLocalCameraEnabled.value) {
+                startLocalRecording(takeTag)
+            } else {
+                _isRecording.value = true
+                startDurationTimer()
+            }
+        } else {
+            // Optional user-specified countdown
+            runSyncedCountdown(countdownSec, takeTag, isDirector = true)
+        }
     }
 
     fun stopMasterRecording() {
@@ -331,7 +339,7 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
                 senderName = "Director"
             )
         )
-        logDirectorEvent("STOP RECORDING broadcasted to all cameras")
+        logDirectorEvent("TRIGGER SENT: Stop Recording via Nearby Connections")
         stopLocalRecording()
     }
 
@@ -369,8 +377,12 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
         client.onStartRecordingTriggered = { targetTimeMs, syncedSettings, takeTag ->
             _settings.value = syncedSettings
             cameraManager.updateSettings(syncedSettings)
-            val waitMs = (targetTimeMs - System.currentTimeMillis()).coerceAtLeast(0)
-            runTargetTimeCountdown(waitMs, takeTag)
+            if (targetTimeMs > 0 && targetTimeMs > System.currentTimeMillis() + 500) {
+                val waitMs = targetTimeMs - System.currentTimeMillis()
+                runTargetTimeCountdown(waitMs, takeTag)
+            } else {
+                startLocalRecording(takeTag)
+            }
         }
 
         client.onStopRecordingTriggered = {
@@ -472,8 +484,12 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
                 cameraManager.updateSettings(synced)
                 val targetMs = packet.countdownTargetTimeMs
                 val takeTag = packet.takeTag
-                val waitMs = (targetMs - System.currentTimeMillis()).coerceAtLeast(0)
-                runTargetTimeCountdown(waitMs, takeTag)
+                if (targetMs > 0 && targetMs > System.currentTimeMillis() + 500) {
+                    val waitMs = targetMs - System.currentTimeMillis()
+                    runTargetTimeCountdown(waitMs, takeTag)
+                } else {
+                    startLocalRecording(takeTag)
+                }
             }
 
             NetworkPacket.TYPE_STOP_RECORDING -> {
