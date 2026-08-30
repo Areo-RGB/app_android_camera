@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -97,6 +101,7 @@ fun CameraNodeScreen(
 
     var manualIpInput by remember { mutableStateOf("") }
     var showManualInput by remember { mutableStateOf(false) }
+    var isPreviewOpen by remember { mutableStateOf(false) }
 
     val isConnected = nodeConnectionState is CameraNodeClient.ConnectionState.Connected
     val connectionTitle = (nodeConnectionState as? CameraNodeClient.ConnectionState.Connected)?.let {
@@ -108,13 +113,43 @@ fun CameraNodeScreen(
             .fillMaxSize()
             .background(StudioDarkBg)
     ) {
-        // Fullscreen Camera Preview
-        CameraPreviewView(
-            cameraManager = viewModel.cameraManager,
-            settings = settings,
-            cameraAngle = assignedAngle,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Battery Saving Camera Preview (Small and hidden by default)
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CameraPreviewView(
+                cameraManager = viewModel.cameraManager,
+                settings = settings,
+                cameraAngle = assignedAngle,
+                modifier = if (isPreviewOpen) {
+                    Modifier
+                        .fillMaxWidth(0.5f)
+                        .aspectRatio(9f / 16f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, StudioBorder, RoundedCornerShape(16.dp))
+                } else {
+                    Modifier.size(1.dp).alpha(0f)
+                }
+            )
+
+            if (!isPreviewOpen) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.VisibilityOff,
+                        contentDescription = "Preview Closed",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Vorschau pausiert (Batterie sparen)",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
 
         // Overlay Studio HUD
         Column(
@@ -460,8 +495,23 @@ fun CameraNodeScreen(
                     }
                 }
 
-                // Quick Local Lens & Torch controls
+                // Quick Local Lens, Torch, and Preview controls
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(
+                        onClick = { isPreviewOpen = !isPreviewOpen },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(StudioDarkBg.copy(alpha = 0.75f), CircleShape)
+                            .border(1.dp, if (isPreviewOpen) ReadyGreen else StudioBorder, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (isPreviewOpen) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = "Toggle Preview",
+                            tint = if (isPreviewOpen) ReadyGreen else TextSecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     IconButton(
                         onClick = { viewModel.toggleTorch() },
                         modifier = Modifier
