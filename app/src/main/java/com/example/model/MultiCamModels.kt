@@ -64,7 +64,8 @@ data class CameraNodeInfo(
     val activeFps: String = VideoFps.FPS_30.name,
     val pingMs: Long = 0L,
     val lastTakeRecorded: String = "",
-    val cameraAngleLabel: String = "CAM"
+    val cameraAngleLabel: String = "CAM",
+    val connectionType: String = "Wi-Fi"
 )
 
 @JsonClass(generateAdapter = true)

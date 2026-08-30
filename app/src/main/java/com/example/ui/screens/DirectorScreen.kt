@@ -162,6 +162,20 @@ fun DirectorScreen(
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                color = DirectorCyan.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DirectorCyan.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "Nearby P2P",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DirectorCyan,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }

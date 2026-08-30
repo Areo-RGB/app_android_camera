@@ -290,6 +290,19 @@ fun CameraNodeCard(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = if (node.connectionType.contains("Nearby", ignoreCase = true)) DirectorCyan.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = node.connectionType,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (node.connectionType.contains("Nearby", ignoreCase = true)) DirectorCyan else TextMuted,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
 
                 Surface(

@@ -67,12 +67,19 @@ fun MultiCamApp(viewModel: MultiCamViewModel) {
 
     var showGallery by remember { mutableStateOf(false) }
 
-    // Required Permissions for Video & Audio recording + Local network discovery
+    // Required Permissions for Video/Audio recording + Google Nearby & Local Network discovery
     val permissionsToRequest = remember {
         val list = mutableListOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            list.add(Manifest.permission.BLUETOOTH_SCAN)
+            list.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            list.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             list.add(Manifest.permission.NEARBY_WIFI_DEVICES)
             list.add(Manifest.permission.READ_MEDIA_VIDEO)

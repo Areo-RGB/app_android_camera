@@ -8,6 +8,7 @@ import com.example.camera.CameraXManager
 import com.example.model.AppMode
 import com.example.model.CameraLens
 import com.example.model.CameraNodeInfo
+import com.example.model.NetworkPacket
 import com.example.model.NodeRecordingStatus
 import com.example.model.RecordingSettings
 import com.example.model.VideoFps
@@ -15,23 +16,27 @@ import com.example.model.VideoResolution
 import com.example.model.VideoTakeItem
 import com.example.network.CameraNodeClient
 import com.example.network.DirectorServer
+import com.example.network.NearbyConnectionsManager
+import com.example.network.NearbyDiscoveredDirector
 import com.example.network.NetworkServiceDiscovery
 import com.example.util.DeviceUtils
 import com.example.util.SyncBeepGenerator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class MultiCamViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context: Context get() = getApplication()
 
     val cameraManager = CameraXManager(context)
+    val nearbyManager = NearbyConnectionsManager(context)
+
     private var directorServer: DirectorServer? = null
     private var nodeClient: CameraNodeClient? = null
 
@@ -61,6 +66,8 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
     private val _discoveredDirectors = MutableStateFlow<List<NetworkServiceDiscovery.DiscoveredDirector>>(emptyList())
     val discoveredDirectors: StateFlow<List<NetworkServiceDiscovery.DiscoveredDirector>> = _discoveredDirectors.asStateFlow()
 
+    val discoveredNearbyDirectors: StateFlow<List<NearbyDiscoveredDirector>> = nearbyManager.discoveredDirectors
+
     private val _assignedCameraAngle = MutableStateFlow("CAM A")
     val assignedCameraAngle: StateFlow<String> = _assignedCameraAngle.asStateFlow()
 
@@ -83,8 +90,12 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
 
     private var countdownJob: Job? = null
     private var durationTimerJob: Job? = null
+    private var nearbyHeartbeatJob: Job? = null
 
     val isTorchOn: StateFlow<Boolean> = cameraManager.isTorchOn
+
+    // Active connection tracking for Camera Node (Nearby vs Socket)
+    private var activeNearbyDirectorEndpointId: String? = null
 
     // --- Mode Setup ---
 
@@ -101,24 +112,130 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
 
     private fun startDirectorMode() {
         cleanupAll()
+        _assignedCameraAngle.value = "CAM 1 (Director)"
+
+        // 1. Start Wi-Fi TCP Server & NSD
         val server = DirectorServer(context)
         directorServer = server
-        _assignedCameraAngle.value = "CAM 1 (Director)"
 
         server.startServer { ip, _ ->
             _directorIp.value = ip
         }
 
         viewModelScope.launch {
-            server.connectedNodes.collect { nodes ->
-                _connectedNodes.value = nodes
+            server.connectedNodes.collect { wifiNodes ->
+                // Merge Wi-Fi nodes with Google Nearby nodes
+                updateConnectedNodes { current ->
+                    val nearbyOnly = current.filterValues { it.connectionType == "Google Nearby" }
+                    nearbyOnly + wifiNodes
+                }
             }
         }
         viewModelScope.launch {
             server.eventLogs.collect { logs ->
-                _directorLogs.value = logs
+                _directorLogs.value = (_directorLogs.value + logs).distinct().takeLast(60)
             }
         }
+
+        // 2. Start Google Nearby Connections Advertising
+        val directorName = "Director (${DeviceUtils.getDeviceName()})"
+        nearbyManager.onLogMessage = { logMsg ->
+            logDirectorEvent(logMsg)
+        }
+
+        nearbyManager.onPacketReceived = { endpointId, packet ->
+            handleNearbyPacketAsDirector(endpointId, packet)
+        }
+
+        nearbyManager.onEndpointDisconnected = { endpointId ->
+            updateConnectedNodes { current ->
+                val removed = current.entries.find { it.key == endpointId || it.value.nodeId == endpointId }
+                if (removed != null) {
+                    logDirectorEvent("${removed.value.deviceName} (${removed.value.cameraAngleLabel}) disconnected [Nearby]")
+                    current - removed.key
+                } else current
+            }
+        }
+
+        nearbyManager.startAdvertising(
+            directorName = directorName,
+            onSuccess = {
+                logDirectorEvent("Google Nearby Advertising started (P2P Direct)")
+            },
+            onFailure = { e ->
+                logDirectorEvent("Nearby Advertising error: ${e.message}")
+            }
+        )
+    }
+
+    private fun handleNearbyPacketAsDirector(endpointId: String, packet: NetworkPacket) {
+        when (packet.type) {
+            NetworkPacket.TYPE_HANDSHAKE_REQUEST -> {
+                val nodeInfo = packet.nodeInfo ?: return
+                val angleIndex = _connectedNodes.value.size
+                val assignedBadge = "CAM ${('A' + angleIndex)}"
+
+                val enriched = nodeInfo.copy(
+                    nodeId = endpointId,
+                    cameraAngleLabel = assignedBadge,
+                    connectionType = "Google Nearby",
+                    ipAddress = "Nearby (P2P)"
+                )
+
+                updateConnectedNodes { current ->
+                    current + (endpointId to enriched)
+                }
+
+                // Send Handshake ACK back to node
+                val ackPacket = NetworkPacket(
+                    type = NetworkPacket.TYPE_HANDSHAKE_ACK,
+                    senderId = "DIRECTOR_NEARBY",
+                    senderName = "Director (${DeviceUtils.getDeviceName()})",
+                    nodeInfo = enriched
+                )
+                nearbyManager.sendPacket(endpointId, ackPacket)
+                logDirectorEvent("${enriched.deviceName} ($assignedBadge) connected via Google Nearby")
+            }
+
+            NetworkPacket.TYPE_HEARTBEAT -> {
+                packet.nodeInfo?.let { updatedInfo ->
+                    val now = System.currentTimeMillis()
+                    val ping = if (packet.timestamp > 0) (now - packet.timestamp).coerceAtLeast(1) else 8
+                    updateConnectedNodes { current ->
+                        val existing = current[endpointId]
+                        val badge = existing?.cameraAngleLabel ?: "CAM"
+                        current + (endpointId to updatedInfo.copy(
+                            nodeId = endpointId,
+                            cameraAngleLabel = badge,
+                            connectionType = "Google Nearby",
+                            ipAddress = "Nearby (P2P)",
+                            pingMs = ping
+                        ))
+                    }
+                }
+            }
+
+            NetworkPacket.TYPE_RECORDING_FINISHED -> {
+                logDirectorEvent("Take recorded on ${packet.senderName}: ${packet.takeTag} [Nearby]")
+                updateConnectedNodes { current ->
+                    current[endpointId]?.let { existing ->
+                        current + (endpointId to existing.copy(
+                            isRecording = false,
+                            status = NodeRecordingStatus.SAVING.name,
+                            lastTakeRecorded = packet.takeTag
+                        ))
+                    } ?: current
+                }
+            }
+        }
+    }
+
+    private fun updateConnectedNodes(transform: (Map<String, CameraNodeInfo>) -> Map<String, CameraNodeInfo>) {
+        _connectedNodes.value = transform(_connectedNodes.value)
+    }
+
+    private fun logDirectorEvent(msg: String) {
+        _directorLogs.value = (_directorLogs.value + msg).takeLast(60)
     }
 
     fun toggleDirectorLocalCamera() {
@@ -130,6 +247,14 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
         cameraManager.updateSettings(newSettings)
         if (_appMode.value == AppMode.DIRECTOR) {
             directorServer?.broadcastSettings(newSettings)
+            nearbyManager.broadcastPacket(
+                NetworkPacket(
+                    type = NetworkPacket.TYPE_SYNC_SETTINGS,
+                    senderId = "DIRECTOR",
+                    senderName = "Director",
+                    settings = newSettings
+                )
+            )
         }
     }
 
@@ -170,13 +295,28 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
         val current = _settings.value
         val takeTag = "${current.sceneName}_Take_${current.takeNumber}"
         val countdownSec = current.countdownSeconds
+        val targetStartTimestamp = System.currentTimeMillis() + (countdownSec * 1000L)
 
-        // Broadcast to all connected camera nodes
+        // Broadcast over Wi-Fi Server
         directorServer?.broadcastStartRecording(
             settings = current,
             countdownSeconds = countdownSec,
             takeTag = takeTag
         )
+
+        // Broadcast over Google Nearby Connections
+        nearbyManager.broadcastPacket(
+            NetworkPacket(
+                type = NetworkPacket.TYPE_START_RECORDING,
+                senderId = "DIRECTOR",
+                senderName = "Director",
+                settings = current,
+                countdownTargetTimeMs = targetStartTimestamp,
+                takeTag = takeTag
+            )
+        )
+
+        logDirectorEvent("START RECORDING broadcasted (Countdown: ${countdownSec}s, Take: $takeTag)")
 
         // Run local synced countdown & record
         runSyncedCountdown(countdownSec, takeTag, isDirector = true)
@@ -184,6 +324,14 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
 
     fun stopMasterRecording() {
         directorServer?.broadcastStopRecording()
+        nearbyManager.broadcastPacket(
+            NetworkPacket(
+                type = NetworkPacket.TYPE_STOP_RECORDING,
+                senderId = "DIRECTOR",
+                senderName = "Director"
+            )
+        )
+        logDirectorEvent("STOP RECORDING broadcasted to all cameras")
         stopLocalRecording()
     }
 
@@ -191,17 +339,25 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
 
     private fun startCameraNodeMode() {
         cleanupAll()
+        _nodeConnectionState.value = CameraNodeClient.ConnectionState.Searching
+
+        // 1. Local Wi-Fi Client & NSD
         val client = CameraNodeClient(context)
         nodeClient = client
 
         viewModelScope.launch {
             client.connectionState.collect { state ->
-                _nodeConnectionState.value = state
+                // Only update if not connected via Nearby
+                if (activeNearbyDirectorEndpointId == null) {
+                    _nodeConnectionState.value = state
+                }
             }
         }
         viewModelScope.launch {
             client.assignedCameraAngle.collect { angle ->
-                _assignedCameraAngle.value = angle
+                if (activeNearbyDirectorEndpointId == null) {
+                    _assignedCameraAngle.value = angle
+                }
             }
         }
 
@@ -225,20 +381,148 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
             triggerClapperFlashAndBeep()
         }
 
-        // Start discovery for directors
+        // Start discovery for Wi-Fi directors
         client.startAutoDiscovery { directors ->
             _discoveredDirectors.value = directors
         }
+
+        // 2. Start Google Nearby Connections Discovery
+        nearbyManager.startDiscovery(
+            onSuccess = {},
+            onFailure = {}
+        )
     }
 
     fun connectNodeToDirector(host: String, port: Int = 8989) {
+        activeNearbyDirectorEndpointId = null
         nodeClient?.connectToDirector(host, port)
+    }
+
+    fun connectNodeToNearbyDirector(director: NearbyDiscoveredDirector) {
+        _nodeConnectionState.value = CameraNodeClient.ConnectionState.Connecting(director.endpointName)
+        val myNodeId = UUID.randomUUID().toString().take(8).uppercase()
+        val myDeviceName = DeviceUtils.getDeviceName()
+
+        nearbyManager.onPacketReceived = { endpointId, packet ->
+            handleNearbyPacketAsNode(packet)
+        }
+
+        nearbyManager.onEndpointDisconnected = { endpointId ->
+            if (endpointId == activeNearbyDirectorEndpointId) {
+                activeNearbyDirectorEndpointId = null
+                nearbyHeartbeatJob?.cancel()
+                _nodeConnectionState.value = CameraNodeClient.ConnectionState.Disconnected
+            }
+        }
+
+        nearbyManager.requestConnectionToDirector(
+            nodeDeviceName = myDeviceName,
+            directorEndpointId = director.endpointId,
+            onConnected = { endpointId, dirName ->
+                activeNearbyDirectorEndpointId = endpointId
+                _nodeConnectionState.value = CameraNodeClient.ConnectionState.Connected("Google Nearby", dirName)
+
+                // Send Handshake
+                val (batt, isCharging) = DeviceUtils.getBatteryInfo(context)
+                val storage = DeviceUtils.getAvailableStorageGb()
+                val handshakePacket = NetworkPacket(
+                    type = NetworkPacket.TYPE_HANDSHAKE_REQUEST,
+                    senderId = myNodeId,
+                    senderName = myDeviceName,
+                    nodeInfo = CameraNodeInfo(
+                        nodeId = myNodeId,
+                        deviceName = myDeviceName,
+                        ipAddress = "Nearby P2P",
+                        batteryPercent = batt,
+                        isCharging = isCharging,
+                        freeStorageGb = storage,
+                        connectionType = "Google Nearby",
+                        status = NodeRecordingStatus.IDLE.name
+                    )
+                )
+                nearbyManager.sendPacket(endpointId, handshakePacket)
+
+                // Start Nearby Heartbeat sender
+                startNearbyHeartbeatLoop(endpointId, myNodeId, myDeviceName)
+            },
+            onError = { errMsg ->
+                _nodeConnectionState.value = CameraNodeClient.ConnectionState.Error(errMsg)
+            }
+        )
+    }
+
+    private fun handleNearbyPacketAsNode(packet: NetworkPacket) {
+        when (packet.type) {
+            NetworkPacket.TYPE_HANDSHAKE_ACK -> {
+                packet.nodeInfo?.cameraAngleLabel?.let { badge ->
+                    _assignedCameraAngle.value = badge
+                }
+            }
+
+            NetworkPacket.TYPE_SYNC_SETTINGS -> {
+                packet.settings?.let { newSettings ->
+                    _settings.value = newSettings
+                    cameraManager.updateSettings(newSettings)
+                }
+            }
+
+            NetworkPacket.TYPE_START_RECORDING -> {
+                val synced = packet.settings ?: RecordingSettings()
+                _settings.value = synced
+                cameraManager.updateSettings(synced)
+                val targetMs = packet.countdownTargetTimeMs
+                val takeTag = packet.takeTag
+                val waitMs = (targetMs - System.currentTimeMillis()).coerceAtLeast(0)
+                runTargetTimeCountdown(waitMs, takeTag)
+            }
+
+            NetworkPacket.TYPE_STOP_RECORDING -> {
+                stopLocalRecording()
+            }
+
+            NetworkPacket.TYPE_CLAPPER_FLASH -> {
+                triggerClapperFlashAndBeep()
+            }
+        }
+    }
+
+    private fun startNearbyHeartbeatLoop(directorEndpointId: String, nodeId: String, deviceName: String) {
+        nearbyHeartbeatJob?.cancel()
+        nearbyHeartbeatJob = viewModelScope.launch {
+            while (isActive && activeNearbyDirectorEndpointId != null) {
+                delay(2000)
+                val (batt, isCharging) = DeviceUtils.getBatteryInfo(context)
+                val storage = DeviceUtils.getAvailableStorageGb()
+                val isRec = _isRecording.value
+                val heartbeat = NetworkPacket(
+                    type = NetworkPacket.TYPE_HEARTBEAT,
+                    senderId = nodeId,
+                    senderName = deviceName,
+                    timestamp = System.currentTimeMillis(),
+                    nodeInfo = CameraNodeInfo(
+                        nodeId = nodeId,
+                        deviceName = deviceName,
+                        ipAddress = "Nearby P2P",
+                        batteryPercent = batt,
+                        isCharging = isCharging,
+                        freeStorageGb = storage,
+                        connectionType = "Google Nearby",
+                        status = if (isRec) NodeRecordingStatus.RECORDING.name else NodeRecordingStatus.IDLE.name,
+                        isRecording = isRec,
+                        cameraAngleLabel = _assignedCameraAngle.value
+                    )
+                )
+                nearbyManager.sendPacket(directorEndpointId, heartbeat)
+            }
+        }
     }
 
     fun refreshDirectorDiscovery() {
         nodeClient?.startAutoDiscovery { directors ->
             _discoveredDirectors.value = directors
         }
+        nearbyManager.stopDiscovery()
+        nearbyManager.startDiscovery()
     }
 
     // --- Countdown & Clapper Engine ---
@@ -257,6 +541,13 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
 
             if (isDirector) {
                 directorServer?.broadcastClapperFlash()
+                nearbyManager.broadcastPacket(
+                    NetworkPacket(
+                        type = NetworkPacket.TYPE_CLAPPER_FLASH,
+                        senderId = "DIRECTOR",
+                        senderName = "Director"
+                    )
+                )
             }
 
             delay(200)
@@ -322,6 +613,17 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
                 if (item != null) {
                     _recordedTakes.value = listOf(item) + _recordedTakes.value
                     nodeClient?.notifyRecordingFinished(takeTag, item.fileName, item.durationSeconds)
+
+                    // Also notify via Nearby if connected via Nearby
+                    activeNearbyDirectorEndpointId?.let { endpointId ->
+                        val finishedPacket = NetworkPacket(
+                            type = NetworkPacket.TYPE_RECORDING_FINISHED,
+                            senderId = endpointId,
+                            senderName = DeviceUtils.getDeviceName(),
+                            takeTag = takeTag
+                        )
+                        nearbyManager.sendPacket(endpointId, finishedPacket)
+                    }
                 }
             }
         )
@@ -352,11 +654,14 @@ class MultiCamViewModel(application: Application) : AndroidViewModel(application
     fun cleanupAll() {
         countdownJob?.cancel()
         durationTimerJob?.cancel()
+        nearbyHeartbeatJob?.cancel()
         cameraManager.stopRecording()
         directorServer?.stopServer()
         directorServer = null
         nodeClient?.disconnect()
         nodeClient = null
+        nearbyManager.stopAllEndpoints()
+        activeNearbyDirectorEndpointId = null
         _isRecording.value = false
         _countdownValue.value = null
         _isClapperFlashing.value = false

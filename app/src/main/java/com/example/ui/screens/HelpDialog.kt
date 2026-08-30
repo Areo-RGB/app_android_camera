@@ -17,8 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CastConnected
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.NetworkWifi
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.WifiTethering
@@ -88,7 +88,7 @@ fun HelpConnectionDialog(
                     .fillMaxWidth()
             ) {
                 Text(
-                    text = "So verbindest du mehrere Smartphones am Filmset:",
+                    text = "Unterstützt Google Nearby Connections (direkt ohne Router) und lokales WLAN:",
                     fontSize = 13.sp,
                     color = TextSecondary
                 )
@@ -97,9 +97,9 @@ fun HelpConnectionDialog(
 
                 SetupStepItem(
                     stepNumber = "1",
-                    title = "Gemeinsames WLAN oder Hotspot",
-                    description = "Verbinde alle Smartphones mit demselben WLAN. Tipp: Am Set ohne Router einfach auf einem Handy den Mobilen Hotspot aktivieren und alle anderen damit verbinden.",
-                    icon = Icons.Default.NetworkWifi,
+                    title = "Google Nearby Connections (Empfohlen)",
+                    description = "Kein WLAN-Router nötig! Bluetooth & Wi-Fi am Handy aktivieren. Die Geräte verbinden sich via Google Nearby P2P direkt miteinander auf Knopfdruck.",
+                    icon = Icons.Default.Sensors,
                     iconColor = DirectorCyan
                 )
 
@@ -108,7 +108,7 @@ fun HelpConnectionDialog(
                 SetupStepItem(
                     stepNumber = "2",
                     title = "Director auf Hauptgerät starten",
-                    description = "Wähle auf dem Steuerungs-Smartphone 'Director Mode'. Das Gerät vergibt automatisch Rollen und synchronisiert Einstellungen.",
+                    description = "Wähle auf dem Master-Smartphone 'Director Mode'. Das Gerät sendet Nearby-Broadcasts und startet den Sync-Server.",
                     icon = Icons.Default.CastConnected,
                     iconColor = RecordRed
                 )
@@ -117,8 +117,8 @@ fun HelpConnectionDialog(
 
                 SetupStepItem(
                     stepNumber = "3",
-                    title = "Kamera-Nodes auf den anderen Geräten",
-                    description = "Auf allen Aufnahme-Handys 'Kamera-Node' wählen. Sie finden den Director per Auto-Discovery (NSD) oder Direkteingabe der IP sofort.",
+                    title = "Kamera-Nodes verbinden",
+                    description = "Auf den anderen Handys 'Kamera-Node' wählen. Der Director erscheint automatisch unter 'Google Nearby' oder im lokalen WLAN.",
                     icon = Icons.Default.Videocam,
                     iconColor = ReadyGreen
                 )
@@ -142,7 +142,7 @@ fun HelpConnectionDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Der 3-Sekunden-Countdown mit Synchronisations-Ton (Klappe) sorgt dafür, dass alle Kameras exakt zeitgleich starten und der Schnitt im Videoschnittprogramm (Premiere/DaVinci) auf den Frame genau synchronisiert werden kann.",
+                            text = "Der synchrone Countdown mit optischer Klappe und Sync-Signalton synchronisiert alle Kameras auf die Millisekunde genau für einfachen Videoschnitt.",
                             fontSize = 12.sp,
                             color = TextSecondary,
                             lineHeight = 16.sp

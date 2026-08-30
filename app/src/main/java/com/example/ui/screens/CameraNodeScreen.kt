@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FlashOff
@@ -86,6 +87,7 @@ fun CameraNodeScreen(
     val settings by viewModel.settings.collectAsState()
     val nodeConnectionState by viewModel.nodeConnectionState.collectAsState()
     val discoveredDirectors by viewModel.discoveredDirectors.collectAsState()
+    val discoveredNearbyDirectors by viewModel.discoveredNearbyDirectors.collectAsState()
     val assignedAngle by viewModel.assignedCameraAngle.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val durationSec by viewModel.recordingDurationSec.collectAsState()
@@ -97,6 +99,9 @@ fun CameraNodeScreen(
     var showManualInput by remember { mutableStateOf(false) }
 
     val isConnected = nodeConnectionState is CameraNodeClient.ConnectionState.Connected
+    val connectionTitle = (nodeConnectionState as? CameraNodeClient.ConnectionState.Connected)?.let {
+        if (it.host == "Google Nearby") "Google Nearby" else "Wi-Fi LAN"
+    } ?: "Offline"
 
     Box(
         modifier = Modifier
@@ -161,7 +166,7 @@ fun CameraNodeScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isConnected) "SYNCED" else "OFFLINE",
+                            text = if (isConnected) "SYNCED • $connectionTitle" else "OFFLINE",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isConnected) ReadyGreen else TextSecondary
@@ -176,15 +181,15 @@ fun CameraNodeScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = StudioDarkBg.copy(alpha = 0.92f)),
+                    colors = CardDefaults.cardColors(containerColor = StudioDarkBg.copy(alpha = 0.94f)),
                     shape = RoundedCornerShape(20.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
                     modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .padding(vertical = 12.dp)
+                        .fillMaxWidth(0.95f)
+                        .padding(vertical = 8.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
+                        modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Row(
@@ -218,58 +223,144 @@ fun CameraNodeScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Discovered Directors List
-                        if (discoveredDirectors.isNotEmpty()) {
-                            Text(
-                                text = "Gefundene Director im Netzwerk:",
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                modifier = Modifier.align(Alignment.Start)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            LazyColumn(modifier = Modifier.height(120.dp)) {
-                                items(discoveredDirectors) { director ->
-                                    Surface(
-                                        color = StudioElevatedBg,
-                                        shape = RoundedCornerShape(10.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, DirectorCyan),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 3.dp)
-                                            .clickable {
-                                                viewModel.connectNodeToDirector(director.host, director.port)
-                                            }
+                        // 1. Discovered Google Nearby Directors (Bluetooth & Wi-Fi Direct P2P)
+                        if (discoveredNearbyDirectors.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Sensors,
+                                    contentDescription = null,
+                                    tint = DirectorCyan,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Google Nearby Direct (Ohne Router):",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DirectorCyan
+                                )
+                            }
+
+                            discoveredNearbyDirectors.forEach { nearbyDirector ->
+                                Surface(
+                                    color = StudioElevatedBg,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.5.dp, DirectorCyan),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .clickable {
+                                            viewModel.connectNodeToNearbyDirector(nearbyDirector)
+                                        }
+                                        .testTag("connect_nearby_director_${nearbyDirector.endpointId}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text(
-                                                    text = director.serviceName,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
-                                                    color = TextPrimary
-                                                )
-                                                Text(
-                                                    text = "${director.host}:${director.port}",
-                                                    fontSize = 11.sp,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = DirectorCyan
-                                                )
-                                            }
+                                        Column {
                                             Text(
-                                                text = "Verbinden",
+                                                text = nearbyDirector.endpointName,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                color = ReadyGreen
+                                                fontSize = 13.sp,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = "Google Nearby • P2P Direct Connect",
+                                                fontSize = 11.sp,
+                                                color = DirectorCyan
+                                            )
+                                        }
+                                        Surface(
+                                            color = DirectorCyan,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "1-Tap Sync",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = StudioDarkBg,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             )
                                         }
                                     }
                                 }
                             }
-                        } else {
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // 2. Discovered Wi-Fi Directors (NSD)
+                        if (discoveredDirectors.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Wifi,
+                                    contentDescription = null,
+                                    tint = ReadyGreen,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Wi-Fi Netzwerk Directors:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ReadyGreen
+                                )
+                            }
+
+                            discoveredDirectors.forEach { director ->
+                                Surface(
+                                    color = StudioElevatedBg,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, StudioBorder),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .clickable {
+                                            viewModel.connectNodeToDirector(director.host, director.port)
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = director.serviceName,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = "${director.host}:${director.port}",
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                        Text(
+                                            text = "Verbinden",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = ReadyGreen
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (discoveredNearbyDirectors.isEmpty() && discoveredDirectors.isEmpty()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(vertical = 8.dp)
@@ -281,7 +372,7 @@ fun CameraNodeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Suche Director im lokalen Netzwerk...",
+                                    text = "Suche Director via Google Nearby & Wi-Fi...",
                                     fontSize = 12.sp,
                                     color = TextSecondary
                                 )
